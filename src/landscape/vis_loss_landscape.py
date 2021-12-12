@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 sys.path.append('./')
 
 import csv
@@ -63,7 +64,7 @@ def obtain_grad_direction(model, valid_queue):
     target = Variable(target, volatile=True)
     if not args.disable_cuda:
       input = input.cuda()
-      target = target.cuda(async=True)
+      target = target.cuda(non_blocking=True)
 
     logits = model(input, 0)
     loss = criterion(logits, target)
@@ -164,7 +165,7 @@ def infer(valid_queue, model, criterion, verbose=True):
       target = Variable(target) #, volatile=True
       if not args.disable_cuda:
         input = input.cuda()
-        target = target.cuda(async=True)
+        target = target.cuda(non_blocking=True)
   
       logits = model(input, 0)
       loss = criterion(logits, target)
@@ -244,18 +245,24 @@ def compute_landscape(base_dir, primitives):
 
   # compute landscape
   print(">>> Computing landscape")
-  x = np.linspace(args.xmin, args.xmax, num=args.xnum)
-  y = np.linspace(args.xmin, args.xmax, num=args.xnum)
+  # argument들을 정수로 변경
+  xmin = int(args.xmin)
+  xmax = int(args.xmax)
+  xnum = int(args.xnum)
+  x = np.linspace(xmin, xmax, num=xnum)
+  y = np.linspace(xmin, xmax, num=xnum)
   losses = np.zeros([len(x), len(y)])
   accs = np.zeros([len(x), len(y)])
   for i, delta1 in enumerate(x):
     for j, delta2 in enumerate(y):
+        start_time = time.time()
         arch_params[0].data.copy_(alpha_value[0] + d1[0]*delta1+d2[0]*delta2)
         arch_params[1].data.copy_(alpha_value[1] + d1[1]*delta1+d2[1]*delta2)
         acc, loss = infer(valid_queue, model, criterion)
         losses[i, j] = loss
         accs[i, j] = acc
         print('x,y/acc/loss: %f,%f/%f/%f'%(delta1, delta2, acc, loss))
+        print("elapsed time: ", time.time() - start_time)
 
   # save loss & acc 
   results_file = os.path.join(landscape_dir, 'results-%d.csv'%args.task_id)

@@ -108,9 +108,9 @@ def main(primitives):
 
             if not args.disable_cuda:
                 input=input.cuda()
-                target=target.cuda(async=True)
+                target=target.cuda(non_blocking=True)
                 input_search=input_search.cuda()
-                target_search=target_search.cuda(async=True)
+                target_search=target_search.cuda(non_blocking=True)
 
             if not args.debug:
                 H = analyser.compute_Hw(input, target, input_search, target_search,
@@ -157,7 +157,7 @@ def infer(valid_queue, model, criterion):
 
         if not args.disable_cuda:
             input=input.cuda()
-            target=target.cuda(async=True) 
+            target=target.cuda(non_blocking=True) 
 
         logits = model(input,0)
         loss = criterion(logits, target)

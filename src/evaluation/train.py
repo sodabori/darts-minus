@@ -60,7 +60,7 @@ def main():
   configuration = '_'.join([args.space, args.dataset])
   settings = '_'.join([str(args.search_dp), str(args.search_wd)])
   with open(args.archs_config_file, 'r') as f:
-    cfg = yaml.load(f)
+    cfg = yaml.safe_load(f)
     arch = dict(cfg)[configuration][settings][args.search_task_id]
 
   print(arch)
@@ -98,8 +98,7 @@ def main():
                  'valid_loss': []}
 
   for epoch in range(args.epochs):
-    scheduler.step()
-    logging.info('epoch %d lr %e', epoch, scheduler.get_lr()[0])
+    logging.info('epoch %d lr %e', epoch, scheduler.get_last_lr()[0])
     model.drop_path_prob = args.drop_path_prob * epoch / args.epochs
 
     # training
@@ -109,6 +108,8 @@ def main():
     # evaluation
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
+
+    scheduler.step()
 
     # update the errors dictionary
     errors_dict['train_acc'].append(100 - train_acc)
@@ -135,7 +136,7 @@ def train(train_queue, model, criterion, optimizer):
       target = target.to(device)
     else:
       input = Variable(input).cuda()
-      target = Variable(target).cuda(async=True)
+      target = Variable(target).cuda(non_blocking=True)
 
     optimizer.zero_grad()
     logits, logits_aux = model(input)
@@ -198,7 +199,7 @@ def infer(valid_queue, model, criterion):
   else:
     for step, (input, target) in enumerate(valid_queue):
       input = Variable(input, volatile=True).cuda()
-      target = Variable(target, volatile=True).cuda(async=True)
+      target = Variable(target, volatile=True).cuda(non_blocking=True)
 
       logits, _ = model(input)
       loss = criterion(logits, target)

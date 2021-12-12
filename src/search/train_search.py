@@ -106,8 +106,7 @@ def main(primitives):
       #epoch += args.epochs - epochs_to_train
       beta_decay_scheduler.step(epoch)
       logging.info("EPOCH %d SKIP BETA DECAY RATE: %e", epoch, beta_decay_scheduler.decay_rate)
-      scheduler.step(epoch)
-      lr = scheduler.get_lr()[0]
+      lr = scheduler.get_last_lr()[0]
       if args.drop_path_prob != 0:
         model.drop_path_prob = args.drop_path_prob * epoch / (args.epochs - 1)
         train_transform.transforms[-1].cutout_prob = args.cutout_prob * epoch / (args.epochs - 1)
@@ -127,6 +126,8 @@ def main(primitives):
       # validation
       valid_acc, valid_obj = infer(valid_queue, model, criterion)
       logging.info('valid_acc %f', valid_acc)
+
+      scheduler.step()
 
       # update the errors dictionary
       errors_dict['train_acc'].append(100 - train_acc)
@@ -352,7 +353,7 @@ def train(epoch, primitives, train_queue, valid_queue, model, architect,
     target = Variable(target, requires_grad=False)
     if not args.disable_cuda:
       input = input.cuda()
-      target = target.cuda(async=True)
+      target = target.cuda(non_blocking=True)
 
     if architect is not None:
       # get a random minibatch from the search queue with replacement
@@ -361,7 +362,7 @@ def train(epoch, primitives, train_queue, valid_queue, model, architect,
       target_search = Variable(target_search, requires_grad=False)
       if not args.disable_cuda:
         input_search = input_search.cuda()
-        target_search = target_search.cuda(async=True)
+        target_search = target_search.cuda(non_blocking=True)
 
       architect.step(input, target, input_search, target_search, lr, optimizer,
                      unrolled=args.unrolled)
@@ -371,7 +372,7 @@ def train(epoch, primitives, train_queue, valid_queue, model, architect,
     loss = criterion(logits, target)
 
     loss.backward()
-    nn.utils.clip_grad_norm(model.parameters(), args.grad_clip)
+    nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
     optimizer.step()
 
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
@@ -396,7 +397,7 @@ def train(epoch, primitives, train_queue, valid_queue, model, architect,
       target = Variable(target, requires_grad=False)
       if not args.disable_cuda:
         input = input.cuda()
-        target = target.cuda(async=True)
+        target = target.cuda(non_blocking=True)
 
       # get gradient information
       #param_grads = [p.grad for p in model.parameters() if p.grad is not None]
@@ -459,29 +460,31 @@ def infer(valid_queue, model, criterion):
 
   valid_gen = valid_generator()
 
-  for step, (input, target) in enumerate(valid_gen): #valid_queue
-    input = Variable(input, volatile=True)
-    target = Variable(target, volatile=True)
-    if not args.disable_cuda:
-      input = input.cuda()
-      target = target.cuda(async=True)
+  with torch.no_grad():
 
-    logits = model(input)
-    loss = criterion(logits, target)
+    for step, (input, target) in enumerate(valid_gen): #valid_queue
+      #input = Variable(input, volatile=True)
+      #target = Variable(target, volatile=True)
+      if not args.disable_cuda:
+        input = input.cuda()
+        target = target.cuda(non_blocking=True)
 
-    prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
-    n = input.size(0)
-    # objs.update(loss.data[0], n)
-    # top1.update(prec1.data[0], n)
-    # top5.update(prec5.data[0], n)
-    objs.update(loss.item(), n)
-    top1.update(prec1.item(), n)
-    top5.update(prec5.item(), n)
+      logits = model(input)
+      loss = criterion(logits, target)
 
-    if step % args.report_freq == 0:
-      logging.info('valid %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
-      if args.debug:
-        break
+      prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
+      n = input.size(0)
+      # objs.update(loss.data[0], n)
+      # top1.update(prec1.data[0], n)
+      # top5.update(prec5.data[0], n)
+      objs.update(loss.item(), n)
+      top1.update(prec1.item(), n)
+      top5.update(prec5.item(), n)
+
+      if step % args.report_freq == 0:
+        logging.info('valid %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
+        if args.debug:
+          break
 
   return top1.avg, objs.avg
 
