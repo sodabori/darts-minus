@@ -2,8 +2,9 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.autograd import Variable
-from src.sam.sam import SAM
 
+from src.sam.sam import SAM
+from src.sam.bypass_bn import enable_running_stats, disable_running_stats
 
 def _concat(xs):
   return torch.cat([x.view(-1) for x in xs])
@@ -15,8 +16,9 @@ class Architect(object):
     self.network_momentum = args.momentum
     self.network_weight_decay = args.weight_decay
     self.model = model
+    self.sam_on_arch = args.sam_on_arch
 
-    if args.sam_on_arch:
+    if self.sam_on_arch:
 
       base_optimizer = torch.optim.Adam
 
@@ -45,12 +47,30 @@ class Architect(object):
     return unrolled_model
 
   def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled):
-    self.optimizer.zero_grad()
-    if unrolled:
-        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
+    if self.sam_on_arch:
+      self.optimizer.zero_grad()
+
+      enable_running_stats(self.model)
+      if unrolled:
+          self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
+      else:
+          self._backward_step(input_valid, target_valid)
+      self.optimizer.first_step(zero_grad=True)
+
+      disable_running_stats(self.model)
+      if unrolled:
+          self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
+      else:
+          self._backward_step(input_valid, target_valid)
+      self.optimizer.second_step(zero_grad=True)
+    
     else:
-        self._backward_step(input_valid, target_valid)
-    self.optimizer.step()
+      self.optimizer.zero_grad()
+      if unrolled:
+          self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
+      else:
+          self._backward_step(input_valid, target_valid)
+      self.optimizer.step()
 
   def _backward_step(self, input_valid, target_valid):
     loss = self.model._loss(input_valid, target_valid)
