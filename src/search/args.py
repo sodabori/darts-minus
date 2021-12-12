@@ -94,6 +94,10 @@ class Parser(object):
         parser.add_argument('--azim', type=float, default=-60, help='azimuthal angle for 3d landscape')
         parser.add_argument('--elev', type=float, default=30, help='elevation angle for 3d landscape')
 
+        # sam
+        parser.add_argument('--sam_on_weight', action='store_true', default=False, help='use SAM on weight parameters for search phase')
+        parser.add_argument('--sam_on_arch', action='store_true', default=False, help='use SAM on architecture parameters for search phase')
+
         self.args = parser.parse_args()
         utils.print_args(self.args)
 

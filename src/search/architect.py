@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.autograd import Variable
+from src.sam.sam import SAM
 
 
 def _concat(xs):
@@ -14,7 +15,22 @@ class Architect(object):
     self.network_momentum = args.momentum
     self.network_weight_decay = args.weight_decay
     self.model = model
-    self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
+
+    if args.sam_on_arch:
+
+      base_optimizer = torch.optim.Adam
+
+      self.optimizer = SAM(
+          self.model.arch_parameters(),
+          base_optimizer,
+          rho=2.0, # 향후 변경 가능
+          adaptive=True,
+          lr=args.arch_learning_rate,
+          betas=(0.5, 0.999),
+          weight_decay=args.arch_weight_decay)
+
+    else:
+      self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
 
   def _compute_unrolled_model(self, input, target, eta, network_optimizer):

@@ -26,6 +26,8 @@ from src.search.model_search import Network
 from src.search.architect import Architect
 from src.search.analyze import Analyzer
 from src.search.args import helper, args, beta_decay_scheduler
+from src.sam.sam import SAM
+from src.sam.bypass_bn import enable_running_stats, disable_running_stats
 
 log_format = '%(asctime)s %(message)s'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
@@ -61,11 +63,25 @@ def main(primitives):
     model_init = model_init.cuda()
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model_init))
 
-  optimizer_init = torch.optim.SGD(
-      model_init.parameters(),
-      args.learning_rate,
-      momentum=args.momentum,
-      weight_decay=args.weight_decay)
+  if args.sam_on_weight:
+
+    base_optimizer = torch.optim.SGD
+
+    optimizer_init = SAM(
+        model_init.parameters(),
+        base_optimizer,
+        rho=2.0, # 향후 변경 가능
+        adaptive=True,
+        lr=args.learning_rate,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay)
+
+  else:
+    optimizer_init = torch.optim.SGD(
+        model_init.parameters(),
+        lr=args.learning_rate,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay)
 
   architect_init = Architect(model_init, args)
 
@@ -367,13 +383,25 @@ def train(epoch, primitives, train_queue, valid_queue, model, architect,
       architect.step(input, target, input_search, target_search, lr, optimizer,
                      unrolled=args.unrolled)
 
-    optimizer.zero_grad()
-    logits = model(input)
-    loss = criterion(logits, target)
+    if args.sam_on_weight:
+      enable_running_stats(model)
+      logits = model(input)
+      loss = criterion(logits, target)
+      loss.backward()
+      optimizer.first_step(zero_grad=True)
 
-    loss.backward()
-    nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-    optimizer.step()
+      disable_running_stats(model)
+      criterion(model(input), target).backward()
+      optimizer.second_step(zero_grad=True)
+    else:
+      optimizer.zero_grad()
+      logits = model(input)
+      loss = criterion(logits, target)
+
+      loss.backward()
+      nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+      optimizer.step()
+
 
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
     # objs.update(loss.data[0], n)
